@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { FileEntry } from 'file-sync-shared';
 
 /**
@@ -57,6 +58,41 @@ export class FileStore {
   }
 
   /**
+   * ルーム内の全ファイルを削除
+   */
+  clearAll(): void {
+    this.deleteDirContents(this.dataDir);
+    console.log('[FileStore] ルーム内全ファイル削除');
+  }
+
+  /**
+   * ルーム内のファイル数を取得
+   */
+  getFileCount(): number {
+    const files: FileEntry[] = [];
+    this.walkDir(this.dataDir, files);
+    return files.length;
+  }
+
+  /**
+   * ディレクトリの中身を再帰的に削除（ディレクトリ自体は残す）
+   */
+  private deleteDirContents(dir: string): void {
+    if (!fs.existsSync(dir)) return;
+
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        this.deleteDirContents(fullPath);
+        fs.rmdirSync(fullPath);
+      } else {
+        fs.unlinkSync(fullPath);
+      }
+    }
+  }
+
+  /**
    * ディレクトリを再帰的に走査
    */
   private walkDir(dir: string, files: FileEntry[]): void {
@@ -72,7 +108,6 @@ export class FileStore {
       } else if (entry.isFile()) {
         const relativePath = path.relative(this.dataDir, fullPath).replace(/\\/g, '/');
         const content = fs.readFileSync(fullPath);
-        const crypto = require('crypto');
         const hash = crypto.createHash('sha256').update(content).digest('hex');
 
         files.push({

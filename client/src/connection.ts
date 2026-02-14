@@ -10,6 +10,11 @@ import chalk from 'chalk';
 
 type MessageHandler = (message: ServerMessage) => void;
 
+export interface AuthResult {
+  room: string;
+  fileCount: number;
+}
+
 /**
  * WebSocket接続管理
  * 認証フロー・自動再接続を担当
@@ -19,8 +24,9 @@ export class Connection {
   private serverUrl: string;
   private username: string;
   private password: string;
+  private room: string;
   private onMessage: MessageHandler;
-  private onConnected: () => void;
+  private onReconnected: (() => void) | null = null;
   private reconnectDelay: number = RECONNECT_INITIAL_DELAY;
   private isClosing: boolean = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -29,20 +35,27 @@ export class Connection {
     serverUrl: string,
     username: string,
     password: string,
-    onMessage: MessageHandler,
-    onConnected: () => void
+    room: string,
+    onMessage: MessageHandler
   ) {
     this.serverUrl = serverUrl;
     this.username = username;
     this.password = password;
+    this.room = room;
     this.onMessage = onMessage;
-    this.onConnected = onConnected;
   }
 
   /**
-   * サーバーに接続開始
+   * 再接続時のコールバックを設定
    */
-  connect(): Promise<void> {
+  setReconnectHandler(handler: () => void): void {
+    this.onReconnected = handler;
+  }
+
+  /**
+   * サーバーに接続開始。認証成功時にルーム情報を返す
+   */
+  connect(): Promise<AuthResult> {
     return new Promise((resolve, reject) => {
       console.log(chalk.yellow(`[Client] ${this.serverUrl} に接続中...`));
 
@@ -52,11 +65,12 @@ export class Connection {
         console.log(chalk.green('[Client] 接続完了 - 認証中...'));
         this.reconnectDelay = RECONNECT_INITIAL_DELAY;
 
-        // 認証メッセージを送信
+        // 認証メッセージを送信（ルーム名を含む）
         const authMsg: ClientMessage = {
           type: 'auth',
           username: this.username,
           password: this.password,
+          room: this.room,
         };
         this.ws!.send(JSON.stringify(authMsg));
       });
@@ -73,9 +87,11 @@ export class Connection {
             const authResp = message as AuthResponse;
 
             if (authResp.success) {
-              console.log(chalk.green('[Client] 認証成功'));
-              this.onConnected();
-              resolve();
+              console.log(chalk.green(`[Client] 認証成功 (ルーム: ${authResp.room}, サーバー上のファイル数: ${authResp.fileCount})`));
+              resolve({
+                room: authResp.room || this.room,
+                fileCount: authResp.fileCount || 0,
+              });
             } else {
               console.error(chalk.red(`[Client] 認証失敗: ${authResp.message}`));
               this.isClosing = true;
@@ -130,8 +146,11 @@ export class Connection {
     this.reconnectTimer = setTimeout(async () => {
       try {
         await this.connect();
+        // 再接続成功時
+        if (this.onReconnected) {
+          this.onReconnected();
+        }
       } catch {
-        // 再接続に失敗した場合、さらに遅延を増やして再試行
         this.reconnectDelay = Math.min(
           this.reconnectDelay * 2,
           RECONNECT_MAX_DELAY

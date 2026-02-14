@@ -26,12 +26,19 @@ const opts = program.opts<{
   password: string;
 }>();
 
-async function askConfirmation(question: string): Promise<boolean> {
-  const rl = readline.createInterface({
+// ============================================================
+// CUI ヘルパー
+// ============================================================
+
+function createReadline(): readline.Interface {
+  return readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
+}
 
+async function askConfirmation(question: string): Promise<boolean> {
+  const rl = createReadline();
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -40,19 +47,45 @@ async function askConfirmation(question: string): Promise<boolean> {
   });
 }
 
+async function askSyncMode(): Promise<'download' | 'upload' | 'skip'> {
+  const rl = createReadline();
+  return new Promise((resolve) => {
+    console.log(chalk.bold('\n初回同期モードを選んでください:'));
+    console.log(`  ${chalk.cyan('1.')} ダウンロード (サーバー → このPC)`);
+    console.log(`  ${chalk.cyan('2.')} アップロード (このPC → サーバー)`);
+    console.log(`  ${chalk.cyan('3.')} スキップ (以降の変更のみ同期)`);
+    rl.question(chalk.yellow('> '), (answer) => {
+      rl.close();
+      switch (answer.trim()) {
+        case '1': resolve('download'); break;
+        case '2': resolve('upload'); break;
+        case '3': resolve('skip'); break;
+        default:
+          console.log(chalk.yellow('無効な入力です。スキップとして扱います。'));
+          resolve('skip');
+      }
+    });
+  });
+}
+
+// ============================================================
+// メイン
+// ============================================================
+
 async function main(): Promise<void> {
   const syncDir = path.resolve(opts.dir);
+  const roomName = path.basename(syncDir);
 
   console.log(chalk.bold('\n=== File Sync Client ===\n'));
-  console.log(`サーバー: ${chalk.cyan(opts.server)}`);
+  console.log(`サーバー:         ${chalk.cyan(opts.server)}`);
+  console.log(`ルーム名:         ${chalk.cyan(roomName)}`);
   console.log(`同期ディレクトリ: ${chalk.cyan(syncDir)}`);
-  console.log(`ユーザー: ${chalk.cyan(opts.username)}`);
-  console.log('');
+  console.log(`ユーザー:         ${chalk.cyan(opts.username)}`);
 
   // 同期ディレクトリの存在確認
   if (!fs.existsSync(syncDir)) {
     const create = await askConfirmation(
-      chalk.yellow(`ディレクトリ "${syncDir}" が存在しません。作成しますか？ (y/N): `)
+      chalk.yellow(`\nディレクトリ "${syncDir}" が存在しません。作成しますか？ (y/N): `)
     );
     if (create) {
       fs.mkdirSync(syncDir, { recursive: true });
@@ -65,47 +98,75 @@ async function main(): Promise<void> {
 
   // 接続確認
   const confirmed = await askConfirmation(
-    chalk.yellow(`このディレクトリを "${opts.server}" と同期しますか？ (y/N): `)
+    chalk.yellow(`\nルーム "${roomName}" に接続しますか？ (y/N): `)
   );
   if (!confirmed) {
     console.log(chalk.red('終了します'));
     process.exit(0);
   }
 
-  // FileWatcherの初期化（まだ開始しない）
-  let watcher: FileWatcher;
-  let syncManager: SyncManager;
-
-  const onMessage = (message: ServerMessage) => {
-    syncManager.handleMessage(message);
-  };
-
-  const onConnected = () => {
-    // 初回接続時は初回同期をリクエスト
-    console.log(chalk.cyan('[Client] 初回同期をリクエスト中...'));
-    const syncReq: SyncRequest = { type: 'sync-request' };
-    connection.send(syncReq);
-  };
-
   // 接続
   const connection = new Connection(
     opts.server,
     opts.username,
     opts.password,
-    onMessage,
-    onConnected
+    roomName,
+    (message: ServerMessage) => {
+      syncManager.handleMessage(message);
+    }
   );
 
   // Watcher と SyncManager を初期化
-  watcher = new FileWatcher(syncDir, (msg) => connection.send(msg));
-  syncManager = new SyncManager(syncDir, watcher);
+  const watcher = new FileWatcher(syncDir, (msg) => connection.send(msg));
+  const syncManager = new SyncManager(syncDir, watcher, (msg) => connection.send(msg));
 
+  let authResult;
   try {
-    await connection.connect();
+    authResult = await connection.connect();
   } catch (err: any) {
     console.error(chalk.red(`\n接続エラー: ${err.message}`));
     process.exit(1);
   }
+
+  // 初回同期モード選択
+  const syncMode = await askSyncMode();
+
+  if (syncMode === 'download') {
+    if (authResult.fileCount > 0) {
+      const ok = await askConfirmation(
+        chalk.red(`\n⚠ このPCの "${syncDir}" の内容がサーバーの内容で上書きされます。本当にいいですか？ (y/N): `)
+      );
+      if (!ok) {
+        console.log(chalk.yellow('スキップに変更しました'));
+      } else {
+        // ダウンロード実行
+        console.log(chalk.cyan('[Client] ダウンロード同期をリクエスト中...'));
+        const syncReq: SyncRequest = { type: 'sync-request' };
+        connection.send(syncReq);
+      }
+    } else {
+      console.log(chalk.yellow('サーバーにファイルがないため、スキップします'));
+    }
+  } else if (syncMode === 'upload') {
+    const ok = await askConfirmation(
+      chalk.red(`\n⚠ サーバーのルーム "${roomName}" の内容が上書きされます。本当にいいですか？ (y/N): `)
+    );
+    if (!ok) {
+      console.log(chalk.yellow('スキップに変更しました'));
+    } else {
+      // アップロード実行
+      syncManager.uploadAllFiles();
+    }
+  } else {
+    console.log(chalk.cyan('初回同期をスキップしました'));
+  }
+
+  // 再接続時はリクエストだけ再送（ダウンロードモード）
+  connection.setReconnectHandler(() => {
+    console.log(chalk.cyan('[Client] 再接続 - 同期をリクエスト中...'));
+    const syncReq: SyncRequest = { type: 'sync-request' };
+    connection.send(syncReq);
+  });
 
   // ファイル監視開始
   watcher.start();

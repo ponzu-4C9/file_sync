@@ -2,7 +2,7 @@
 // File Sync - 共通型定義
 // ============================================================
 
-/** ファイルエントリ（初回同期用） */
+/** ファイルエントリ（同期用） */
 export interface FileEntry {
   /** sd内の相対パス（例: "app/page.tsx"） */
   filePath: string;
@@ -21,6 +21,8 @@ export interface AuthRequest {
   type: 'auth';
   username: string;
   password: string;
+  /** ルーム名（= フォルダ名） */
+  room: string;
 }
 
 /** ファイル変更通知 */
@@ -37,9 +39,20 @@ export interface FileDeleteMessage {
   filePath: string;
 }
 
-/** 初回同期リクエスト */
+/** 初回同期リクエスト（サーバー → クライアント） */
 export interface SyncRequest {
   type: 'sync-request';
+}
+
+/** ルーム内の全ファイルをクリア（アップロード前） */
+export interface SyncClear {
+  type: 'sync-clear';
+}
+
+/** クライアントの全ファイルをサーバーにアップロード */
+export interface SyncUpload {
+  type: 'sync-upload';
+  files: FileEntry[];
 }
 
 /** クライアント→サーバーの全メッセージ型 */
@@ -47,7 +60,9 @@ export type ClientMessage =
   | AuthRequest
   | FileChangeMessage
   | FileDeleteMessage
-  | SyncRequest;
+  | SyncRequest
+  | SyncClear
+  | SyncUpload;
 
 // ============================================================
 // サーバー → クライアント メッセージ
@@ -58,6 +73,10 @@ export interface AuthResponse {
   type: 'auth-response';
   success: boolean;
   message?: string;
+  /** 接続先ルーム名 */
+  room?: string;
+  /** サーバー上のルーム内ファイル数 */
+  fileCount?: number;
 }
 
 /** ファイル更新通知（他クライアントから） */
