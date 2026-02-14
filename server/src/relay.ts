@@ -88,7 +88,7 @@ export class RelayServer {
               authenticated = true;
               clearTimeout(authTimer);
 
-              const room = message.room;
+              const room = message.room || 'default';
               const store = this.getStore(room);
 
               clientInfo = { ws, username: message.username, room };
