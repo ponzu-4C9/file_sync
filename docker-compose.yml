@@ -1,0 +1,16 @@
+services:
+  sync-server:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SYNC_USERNAME=admin
+      - SYNC_PASSWORD=changeme
+      - SYNC_PORT=8080
+      - SYNC_DATA_DIR=/app/data
+    volumes:
+      - sync-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  sync-data:

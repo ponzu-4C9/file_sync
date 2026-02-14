@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.sync-tmp
+.env

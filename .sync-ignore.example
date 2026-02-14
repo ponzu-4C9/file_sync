@@ -1,0 +1,26 @@
+# .sync-ignore
+# このファイルを同期ディレクトリ内に配置してください
+# .gitignore と同じ書式です
+
+# バージョン管理
+.git/
+
+# Node.js
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS生成ファイル
+.DS_Store
+Thumbs.db
+
+# IDE設定（必要に応じてコメント解除）
+# .vscode/
+# .idea/
+
+# 一時ファイル
+*.sync-tmp
+*.tmp
+*.log
