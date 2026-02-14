@@ -2,7 +2,7 @@ services:
   sync-server:
     build: .
     ports:
-      - "49152:8080"
+      - "49522:8080"
     environment:
       - SYNC_USERNAME=admin
       - SYNC_PASSWORD=changeme
