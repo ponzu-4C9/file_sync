@@ -44,6 +44,10 @@ export class RelayServer {
    * ルームのFileStoreを取得または作成
    */
   private getStore(room: string): FileStore {
+    if (!room || typeof room !== 'string') {
+      console.error(`[Server] getStore: 無効なルーム名: ${JSON.stringify(room)}, baseDataDir: ${JSON.stringify(this.baseDataDir)}`);
+      throw new Error(`無効なルーム名: ${JSON.stringify(room)}`);
+    }
     let store = this.roomStores.get(room);
     if (!store) {
       const roomDir = path.join(this.baseDataDir, room);
